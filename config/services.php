@@ -22,6 +22,13 @@ return [
         'key' => env('RESEND_API_KEY'),
     ],
 
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'web_search_model' => env('OPENAI_WEB_SEARCH_MODEL', 'gpt-5.5'),
+        'timeout' => env('OPENAI_WEB_SEARCH_TIMEOUT', 90),
+        'web_search_domains' => array_filter(array_map('trim', explode(',', env('OPENAI_WEB_SEARCH_DOMAINS', 'itviec.com,vietnamworks.com,linkedin.com')))),
+    ],
+
     'ses' => [
         'key' => env('AWS_ACCESS_KEY_ID'),
         'secret' => env('AWS_SECRET_ACCESS_KEY'),
