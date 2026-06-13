@@ -1,0 +1,31 @@
+{
+  "theme": "base",
+  "themeVariables": {
+    "background": "#ffffff",
+    "primaryColor": "#eaf3ff",
+    "primaryTextColor": "#102a43",
+    "primaryBorderColor": "#3e7cb1",
+    "secondaryColor": "#fff3e6",
+    "secondaryTextColor": "#7c2d12",
+    "secondaryBorderColor": "#f59e0b",
+    "tertiaryColor": "#e8f7ee",
+    "tertiaryTextColor": "#14532d",
+    "tertiaryBorderColor": "#22a06b",
+    "lineColor": "#49657a",
+    "actorBkg": "#eaf3ff",
+    "actorBorder": "#3e7cb1",
+    "actorTextColor": "#102a43",
+    "actorLineColor": "#49657a",
+    "signalColor": "#274c77",
+    "signalTextColor": "#102a43",
+    "labelBoxBkgColor": "#f8fafc",
+    "labelBoxBorderColor": "#94a3b8",
+    "labelTextColor": "#102a43",
+    "noteBkgColor": "#fff7d6",
+    "noteBorderColor": "#d69e2e",
+    "noteTextColor": "#5f370e",
+    "activationBkgColor": "#d7e8ff",
+    "activationBorderColor": "#3e7cb1",
+    "sequenceNumberColor": "#102a43"
+  }
+}

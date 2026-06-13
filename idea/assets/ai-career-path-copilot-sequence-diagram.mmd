@@ -1,0 +1,57 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant UI as Career Copilot UI
+    participant Parser as CV Parser
+    participant ATS as ATS CV Engine
+    participant Match as Job Matching Engine
+    participant Jobs as Job Platforms
+    participant CVGen as Tailored CV Generator
+    participant Roadmap as Roadmap Engine
+    participant Proof as Proof Store
+
+    Note over UI,ATS: Human-in-the-loop flow. The system can suggest, but the user must review and approve.
+
+    User->>UI: Upload CV (PDF or Word)
+    UI->>Parser: Parse CV into structured sections
+    Parser-->>UI: Structured CV data
+    UI->>ATS: Generate ATS-friendly master CV draft
+    ATS-->>UI: ATS master CV draft
+    UI-->>User: Show ATS draft for review and edits
+    User->>UI: Approve corrected ATS master CV
+
+    UI->>Match: Search jobs using approved CV evidence
+    Match->>Jobs: Retrieve matching JDs
+    Jobs-->>Match: JDs and metadata
+    Match-->>UI: Ranked jobs with fit explanations
+    UI-->>User: Display matched jobs
+
+    User->>UI: Open one selected JD
+    UI->>CVGen: Generate first JD-specific CV from approved evidence only
+    CVGen-->>UI: Tailored CV draft and evidence mapping
+    UI-->>User: Show draft with match and gap explanations
+
+    opt User wants another version
+        User->>UI: Submit feedback on emphasis or wording
+        UI->>CVGen: Regenerate CV using feedback and approved evidence
+        CVGen-->>UI: Updated JD-specific CV draft
+        UI-->>User: Review regenerated draft
+    end
+
+    User->>UI: Finalize tailored CV draft
+
+    alt Skill gaps exist for this JD
+        User->>UI: Click Generate Roadmap
+        UI->>Roadmap: Build JD-specific learning roadmap
+        Roadmap-->>UI: Roadmap with milestones
+        UI-->>User: Show roadmap
+        User->>UI: Mark roadmap item complete and attach proof
+        UI->>Proof: Store completion evidence
+        Proof-->>UI: Evidence saved
+        User->>UI: Generate updated CV version
+        UI->>CVGen: Create updated CV using approved evidence and proof
+        CVGen-->>UI: Updated JD-specific CV version
+        UI-->>User: Review updated tailored CV
+    else No major gaps
+        UI-->>User: Ready to export and apply
+    end
