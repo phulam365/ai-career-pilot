@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\DashboardRoadmapRequest;
+use App\Http\Requests\RoadmapProgressRequest;
 use App\Services\CvTextExtractor;
 use App\Services\OpenAiWebJobMatchService;
 use App\Services\VietnamJobMatchService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\Rule;
@@ -21,10 +24,11 @@ class CareerMatchController extends Controller
         private OpenAiWebJobMatchService $openAiWebJobMatchService,
     ) {}
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
         return Inertia::render('career-match', [
-            'analysis' => null,
+            'analysis' => $request->session()->get('career_match_analysis'),
+            'careerMatchRoadmap' => $request->session()->get('career_match_roadmap'),
             'openAiConfigured' => $this->openAiWebJobMatchService->isConfigured(),
             'targetRoles' => $this->targetRoles(),
         ]);
@@ -78,11 +82,74 @@ class CareerMatchController extends Controller
             ]);
         }
 
+        $request->session()->put('career_match_analysis', $analysis);
+        $request->session()->forget('career_match_roadmap');
+
         return Inertia::render('career-match', [
             'analysis' => $analysis,
+            'careerMatchRoadmap' => null,
             'openAiConfigured' => $this->openAiWebJobMatchService->isConfigured(),
             'targetRoles' => $this->targetRoles(),
         ]);
+    }
+
+    public function roadmap(DashboardRoadmapRequest $request): RedirectResponse
+    {
+        $analysis = $request->session()->get('career_match_analysis');
+
+        if (! is_array($analysis)) {
+            throw ValidationException::withMessages([
+                'job_id' => 'Upload a CV and generate matches before creating a roadmap.',
+            ]);
+        }
+
+        $job = $this->findJobById($analysis['results'] ?? [], (string) $request->validated('job_id'));
+
+        if (! is_array($job)) {
+            throw ValidationException::withMessages([
+                'job_id' => 'The selected job match is no longer available.',
+            ]);
+        }
+
+        try {
+            $roadmap = $this->openAiWebJobMatchService->generateRoadmap($job);
+        } catch (RuntimeException $exception) {
+            throw ValidationException::withMessages([
+                'job_id' => $exception->getMessage(),
+            ]);
+        }
+
+        $request->session()->put('career_match_roadmap', [
+            'job_id' => $job['id'],
+            'roadmap' => $roadmap,
+        ]);
+
+        return to_route('career-match.index');
+    }
+
+    public function roadmapProgress(RoadmapProgressRequest $request): RedirectResponse
+    {
+        $storedRoadmap = $request->session()->get('career_match_roadmap');
+        $validated = $request->validated();
+
+        if (! is_array($storedRoadmap) || ($storedRoadmap['job_id'] ?? null) !== $validated['job_id']) {
+            throw ValidationException::withMessages([
+                'job_id' => 'Generate a roadmap before submitting progress.',
+            ]);
+        }
+
+        $storedRoadmap['completed_steps'] = $this->completedStepIndexes($validated['completed_steps'] ?? []);
+        $storedRoadmap['progress_action'] = $validated['action'];
+
+        $request->session()->put('career_match_roadmap', $storedRoadmap);
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => $validated['action'] === 'update_cv'
+                ? __('Roadmap progress saved for CV update.')
+                : __('Roadmap progress submitted.'),
+        ]);
+
+        return to_route('career-match.index');
     }
 
     /**
@@ -94,5 +161,35 @@ class CareerMatchController extends Controller
             'Auto-detect',
             ...$this->vietnamJobMatchService->targetRoles(),
         ];
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function completedStepIndexes(mixed $indexes): array
+    {
+        if (! is_array($indexes)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_map('intval', $indexes)));
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function findJobById(mixed $results, string $jobId): ?array
+    {
+        if (! is_array($results)) {
+            return null;
+        }
+
+        foreach ($results as $result) {
+            if (is_array($result) && ($result['id'] ?? null) === $jobId) {
+                return $result;
+            }
+        }
+
+        return null;
     }
 }

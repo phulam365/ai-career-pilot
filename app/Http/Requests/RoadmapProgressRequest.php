@@ -4,9 +4,9 @@ namespace App\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rules\File;
+use Illuminate\Validation\Rule;
 
-class DashboardCvUploadRequest extends FormRequest
+class RoadmapProgressRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -24,7 +24,10 @@ class DashboardCvUploadRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'cv' => ['required', File::types(['pdf', 'docx', 'txt'])->max(5120)],
+            'job_id' => ['required', 'string', 'max:160'],
+            'completed_steps' => ['nullable', 'array'],
+            'completed_steps.*' => ['integer', 'min:0'],
+            'action' => ['required', Rule::in(['update_cv', 'submit'])],
         ];
     }
 }

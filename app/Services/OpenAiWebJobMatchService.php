@@ -61,11 +61,14 @@ class OpenAiWebJobMatchService
             throw new RuntimeException('OpenAI returned a response that could not be parsed as JSON.');
         }
 
-        $results = collect($modelJson['results'] ?? [])
-            ->take(3)
-            ->values()
-            ->map(fn (array $result, int $index): array => $this->normalizeResult($result, $index, $normalizedLocation))
-            ->all();
+        $results = [];
+        $rawResults = is_array($modelJson['results'] ?? null) ? $modelJson['results'] : [];
+
+        foreach (array_slice($rawResults, 0, 3) as $index => $result) {
+            if (is_array($result)) {
+                $results[] = $this->normalizeResult($result, (int) $index, $normalizedLocation);
+            }
+        }
 
         if ($results === []) {
             throw new RuntimeException('OpenAI web search did not return any job matches.');
@@ -92,9 +95,66 @@ class OpenAiWebJobMatchService
         return $this->apiKey() !== null;
     }
 
+    /**
+     * @param  array<string, mixed>  $job
+     * @return array{
+     *     title: string,
+     *     summary: string,
+     *     steps: array<int, array{
+     *         skill: string,
+     *         target_outcome: string,
+     *         learning_actions: array<int, string>,
+     *         learning_action_sources: array<int, array{title: string, url: string}>,
+     *         portfolio_task: string,
+     *         cv_proof: string,
+     *         estimated_time: string,
+     *         sources: array<int, array{title: string, url: string}>
+     *     }>,
+     *     timeline: array<int, string>,
+     *     cv_updates: array<int, string>
+     * }
+     */
+    public function generateRoadmap(array $job): array
+    {
+        $apiKey = $this->apiKey();
+
+        if ($apiKey === null) {
+            throw new RuntimeException('OpenAI API key is missing. Add OPENAI_API_KEY to generate a roadmap.');
+        }
+
+        $response = Http::withToken($apiKey)
+            ->acceptJson()
+            ->asJson()
+            ->timeout((int) config('services.openai.timeout', 90))
+            ->post('https://api.openai.com/v1/responses', [
+                'model' => $this->model(),
+                'input' => $this->roadmapPrompt($job),
+                'text' => [
+                    'format' => [
+                        'type' => 'json_schema',
+                        'name' => 'career_roadmap',
+                        'strict' => true,
+                        'schema' => $this->roadmapSchema(),
+                    ],
+                ],
+            ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException('OpenAI roadmap generation failed: '.$response->body());
+        }
+
+        $roadmap = $this->parseModelJson($this->outputText($response->json() ?? []));
+
+        if (! is_array($roadmap)) {
+            throw new RuntimeException('OpenAI returned a roadmap that could not be parsed as JSON.');
+        }
+
+        return $this->normalizeRoadmap($roadmap, $job);
+    }
+
     private function apiKey(): ?string
     {
-        $apiKey = config('services.openai.api_key') ?: env('OPENAI_API_KEY');
+        $apiKey = config('services.openai.api_key');
 
         if (is_string($apiKey) && trim($apiKey) !== '') {
             return trim($apiKey);
@@ -121,7 +181,7 @@ class OpenAiWebJobMatchService
 
     private function model(): string
     {
-        $model = config('services.openai.web_search_model') ?: env('OPENAI_WEB_SEARCH_MODEL');
+        $model = config('services.openai.web_search_model');
 
         return is_string($model) && trim($model) !== '' ? trim($model) : 'gpt-5.5';
     }
@@ -212,6 +272,111 @@ PROMPT;
     }
 
     /**
+     * @param  array<string, mixed>  $job
+     */
+    private function roadmapPrompt(array $job): string
+    {
+        $missingSkills = implode(', ', $this->stringList($job['missing_skills'] ?? []));
+        $matchedSkills = implode(', ', $this->stringList($job['matched_skills'] ?? []));
+        $title = (string) ($job['title'] ?? 'Selected job');
+        $company = (string) ($job['company'] ?? 'Selected company');
+        $location = (string) ($job['location'] ?? 'Vietnam');
+        $summary = (string) ($job['summary'] ?? $job['job_description'] ?? 'No summary provided.');
+
+        return <<<PROMPT
+You are AI Career Pilot. Generate a practical learning roadmap for a candidate after they click a matched job row.
+
+Use exactly the requested JSON structure. Keep the roadmap specific to the missing skills and the selected job.
+
+Selected job:
+- Title: {$title}
+- Company: {$company}
+- Location: {$location}
+- Job summary: {$summary}
+- Matched skills: {$matchedSkills}
+- Missing skills: {$missingSkills}
+
+Rules:
+- Create one step for each missing skill when missing skills exist.
+- If there are no missing skills, create one step for interview readiness and CV tailoring.
+- Each learning_actions list must contain exactly 3 short actions.
+- Add exactly one learning_action_sources item for each learning_actions item, in the same order.
+- Each learning_action_sources item must include a concise title and a real HTTPS URL that helps the candidate complete that exact action.
+- Add 1 to 3 practical learning sources to each step. Prefer official documentation, platform guides, trusted university resources, or high-signal tutorials that directly help with that step.
+- Each source must include a concise title and a real HTTPS URL.
+- Keep estimated_time practical for an early-career candidate.
+- Do not include markdown fences.
+PROMPT;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function roadmapSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'title' => ['type' => 'string'],
+                'summary' => ['type' => 'string'],
+                'steps' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'skill' => ['type' => 'string'],
+                            'target_outcome' => ['type' => 'string'],
+                            'learning_actions' => [
+                                'type' => 'array',
+                                'items' => ['type' => 'string'],
+                            ],
+                            'learning_action_sources' => [
+                                'type' => 'array',
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'title' => ['type' => 'string'],
+                                        'url' => ['type' => 'string'],
+                                    ],
+                                    'required' => ['title', 'url'],
+                                    'additionalProperties' => false,
+                                ],
+                            ],
+                            'portfolio_task' => ['type' => 'string'],
+                            'cv_proof' => ['type' => 'string'],
+                            'estimated_time' => ['type' => 'string'],
+                            'sources' => [
+                                'type' => 'array',
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'title' => ['type' => 'string'],
+                                        'url' => ['type' => 'string'],
+                                    ],
+                                    'required' => ['title', 'url'],
+                                    'additionalProperties' => false,
+                                ],
+                            ],
+                        ],
+                        'required' => ['skill', 'target_outcome', 'learning_actions', 'learning_action_sources', 'portfolio_task', 'cv_proof', 'estimated_time', 'sources'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+                'timeline' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string'],
+                ],
+                'cv_updates' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string'],
+                ],
+            ],
+            'required' => ['title', 'summary', 'steps', 'timeline', 'cv_updates'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      */
     private function outputText(array $payload): string
@@ -294,6 +459,154 @@ PROMPT;
             'over_points' => $this->stringList($result['over_points'] ?? []),
             'under_points' => array_values(array_unique([...$underPoints, ...$roadmap])),
             'source_note' => (string) ($result['source_note'] ?? 'Live OpenAI web search result.'),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $roadmap
+     * @param  array<string, mixed>  $job
+     * @return array{
+     *     title: string,
+     *     summary: string,
+     *     steps: array<int, array{
+     *         skill: string,
+     *         target_outcome: string,
+     *         learning_actions: array<int, string>,
+     *         learning_action_sources: array<int, array{title: string, url: string}>,
+     *         portfolio_task: string,
+     *         cv_proof: string,
+     *         estimated_time: string,
+     *         sources: array<int, array{title: string, url: string}>
+     *     }>,
+     *     timeline: array<int, string>,
+     *     cv_updates: array<int, string>
+     * }
+     */
+    private function normalizeRoadmap(array $roadmap, array $job): array
+    {
+        $missingSkills = $this->stringList($job['missing_skills'] ?? []);
+        $fallbackSkill = $missingSkills[0] ?? 'CV tailoring';
+        $steps = [];
+        $rawSteps = is_array($roadmap['steps'] ?? null) ? $roadmap['steps'] : [];
+
+        foreach ($rawSteps as $step) {
+            if (! is_array($step)) {
+                continue;
+            }
+
+            $skill = (string) ($step['skill'] ?? $fallbackSkill);
+            $sources = $this->sourceList($step['sources'] ?? []);
+            $learningActions = array_slice($this->stringList($step['learning_actions'] ?? []), 0, 3);
+
+            $steps[] = [
+                'skill' => $skill,
+                'target_outcome' => (string) ($step['target_outcome'] ?? 'Show job-ready evidence for this skill.'),
+                'learning_actions' => $learningActions,
+                'learning_action_sources' => $this->learningActionSources($learningActions, $step['learning_action_sources'] ?? []),
+                'portfolio_task' => (string) ($step['portfolio_task'] ?? 'Add a focused project task that demonstrates the skill.'),
+                'cv_proof' => (string) ($step['cv_proof'] ?? 'Add one measurable CV bullet with the outcome.'),
+                'estimated_time' => (string) ($step['estimated_time'] ?? '1 week'),
+                'sources' => $sources !== [] ? $sources : $this->fallbackRoadmapSources($skill),
+            ];
+        }
+
+        if ($steps === []) {
+            $steps[] = [
+                'skill' => $fallbackSkill,
+                'target_outcome' => 'Create visible evidence that fits the selected job.',
+                'learning_actions' => ['Study the JD keywords.', 'Build one small proof task.', 'Rewrite one CV bullet with measurable impact.'],
+                'learning_action_sources' => $this->learningActionSources([
+                    'Study the JD keywords.',
+                    'Build one small proof task.',
+                    'Rewrite one CV bullet with measurable impact.',
+                ], []),
+                'portfolio_task' => 'Publish a small project or case note tied to the selected role.',
+                'cv_proof' => 'Add a bullet that names the skill, action, and result.',
+                'estimated_time' => '1 week',
+                'sources' => $this->fallbackRoadmapSources($fallbackSkill),
+            ];
+        }
+
+        return [
+            'title' => (string) ($roadmap['title'] ?? 'Roadmap for '.($job['title'] ?? 'selected job')),
+            'summary' => (string) ($roadmap['summary'] ?? 'Focus on the missing skills that most affect this job match.'),
+            'steps' => $steps,
+            'timeline' => $this->stringList($roadmap['timeline'] ?? []),
+            'cv_updates' => $this->stringList($roadmap['cv_updates'] ?? []),
+        ];
+    }
+
+    /**
+     * @param  array<int, string>  $learningActions
+     * @return array<int, array{title: string, url: string}>
+     */
+    private function learningActionSources(array $learningActions, mixed $values): array
+    {
+        $sources = $this->sourceList($values);
+
+        foreach ($learningActions as $index => $action) {
+            if (isset($sources[$index])) {
+                continue;
+            }
+
+            $sources[$index] = $this->fallbackRoadmapSources($action)[0];
+        }
+
+        return array_slice(array_values($sources), 0, count($learningActions));
+    }
+
+    /**
+     * @return array<int, array{title: string, url: string}>
+     */
+    private function sourceList(mixed $values): array
+    {
+        if (! is_array($values)) {
+            return [];
+        }
+
+        $sources = [];
+
+        foreach ($values as $value) {
+            if (! is_array($value)) {
+                continue;
+            }
+
+            $url = trim((string) ($value['url'] ?? ''));
+            $title = trim((string) ($value['title'] ?? ''));
+
+            if ($title === '' || ! Str::startsWith($url, 'https://')) {
+                continue;
+            }
+
+            $sources[] = [
+                'title' => $title,
+                'url' => $url,
+            ];
+
+            if (count($sources) === 3) {
+                break;
+            }
+        }
+
+        return $sources;
+    }
+
+    /**
+     * @return array<int, array{title: string, url: string}>
+     */
+    private function fallbackRoadmapSources(string $skill): array
+    {
+        $query = rawurlencode($skill);
+
+        return [
+            [
+                'title' => 'freeCodeCamp',
+                'url' => "https://www.freecodecamp.org/news/search/?query={$query}",
+            ],
+            [
+                'title' => 'MDN Web Docs',
+                'url' => 'https://developer.mozilla.org/en-US/docs/Learn',
+            ],
         ];
     }
 
