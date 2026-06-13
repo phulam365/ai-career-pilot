@@ -34,6 +34,12 @@ This application is a Laravel application and its main Laravel ecosystems packag
 
 This project has domain-specific skills available in `**/skills/**`. You MUST activate the relevant skill whenever you work in that domain—don't wait until you're stuck.
 
+## Design System Contract
+
+- Before creating or changing any UI, page, section, or reusable component, read the root `DESIGN.md`.
+- Follow `DESIGN.md` strictly for colors, typography, spacing, borders, shadows, motion, and component anatomy.
+- Do not invent new visual patterns for UI work unless `DESIGN.md` is updated first or in the same change.
+
 ## Conventions
 
 - You must follow all existing code conventions used in this application. When creating or editing a file, check sibling files for the correct structure, approach, and naming.
@@ -42,7 +48,8 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 
 ## Verification Scripts
 
-- Do not create verification scripts or tinker when tests cover that functionality and prove they work. Unit and feature tests are more important.
+- Do not create verification scripts or tinker when existing coverage already proves the behavior.
+- Do not write or update tests unless the user explicitly asks for tests.
 
 ## Application Structure & Architecture
 
@@ -120,8 +127,8 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 
 # Test Enforcement
 
-- Every change must be programmatically tested. Write a new test or update an existing test, then run the affected tests to make sure they pass.
-- Run the minimum number of tests needed to ensure code quality and speed. Use `php artisan test --compact` with a specific filename or filter.
+- Tests are not required by default in this repository.
+- Only write or run tests when the user explicitly asks for them, and then run the minimum affected set with `php artisan test --compact`.
 
 === inertia-laravel/core rules ===
 
